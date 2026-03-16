@@ -16,7 +16,6 @@ import { UserBlacklistService } from "../../../../v2/services/user/blacklist";
 @Controller<RequestType, ResponseType>({
     method: "post",
     path: "room/join",
-    ipblock: true,
     auth: true,
 })
 export class JoinRoom extends AbstractController<RequestType, ResponseType> {
