@@ -23,6 +23,7 @@ import { fastifyAPILogger } from "./plugins/fastify/api-logger";
 import { initTasks } from "./v2/tasks";
 import { fastifyAuthenticate } from "./plugins/fastify/authenticate";
 import { fastifyIpBlock } from "./plugins/fastify/ipBlock";
+import { registerAdminBlacklistWeb } from "./admin/blacklist-web";
 
 const app = fastify({
     caseSensitive: true,
@@ -112,6 +113,7 @@ void orm().then(async dataSource => {
 
     registerV1Routers(app, httpRouters);
     registerV2Routers(app, v2Routes);
+    registerAdminBlacklistWeb(app);
 
     await initTasks();
     app.listen(

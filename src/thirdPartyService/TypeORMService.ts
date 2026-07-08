@@ -24,8 +24,10 @@ import { OAuthUsersModel } from "../model/oauth/oauth-users";
 import { UserEmailModel } from "../model/user/Email";
 import { UserPmiModel } from "../model/user/Pmi";
 import { UserAgreementModel } from "../model/user/Agreement";
+import { UserBlacklistModel } from "../model/user/Blacklist";
 import { PartnerModel } from "../model/partner/Partner";
 import { PartnerRoomModel } from "../model/partner/PartnerRoom";
+import { AdminAccountModel } from "../model/admin/AdminAccount";
 
 export const dataSource = new DataSource({
     type: "mysql",
@@ -46,6 +48,7 @@ export const dataSource = new DataSource({
         UserSensitiveModel,
         UserPmiModel,
         UserAgreementModel,
+        UserBlacklistModel,
         RoomModel,
         RoomUserModel,
         RoomPeriodicConfigModel,
@@ -60,6 +63,7 @@ export const dataSource = new DataSource({
         OAuthUsersModel,
         PartnerModel,
         PartnerRoomModel,
+        AdminAccountModel,
     ],
     extra: {
         connectionLimit: 50,

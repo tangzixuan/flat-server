@@ -10,6 +10,10 @@ import { LoginAgora } from "../platforms/LoginAgora";
 import { ServiceUserAgora } from "../../../service/user/UserAgora";
 import { AgoraLogin, Website } from "../../../../constants/Config";
 import { generateAvatar } from "../../../../utils/Avatar";
+import { dataSource } from "../../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../../v2/services/user/blacklist";
+import { FError } from "../../../../error/ControllerError";
+import { ErrorCode } from "../../../../ErrorCode";
 
 @Controller<RequestType, any>({
     method: "get",
@@ -44,6 +48,12 @@ export class AgoraCallback extends AbstractController<RequestType> {
 
         const userUUIDByDB = await ServiceUserAgora.userUUIDByUnionUUID(userInfo.unionUUID);
 
+        if (userUUIDByDB) {
+            await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+                userUUID: userUUIDByDB,
+            });
+        }
+
         const userUUID = userUUIDByDB || v4();
 
         const loginAgora = new LoginAgora({
@@ -68,9 +78,21 @@ export class AgoraCallback extends AbstractController<RequestType> {
     }
 
     public async errorHandler(error: Error): Promise<ResponseError> {
-        await redisService.set(RedisKey.authFailed(this.querystring.state), error.message, 60 * 60);
+        const isBlacklisted =
+            error instanceof FError && error.errorCode === ErrorCode.UserBlacklisted;
+
+        await redisService.set(
+            RedisKey.authFailed(this.querystring.state),
+            isBlacklisted ? "user_blacklisted" : error.message,
+            60 * 60,
+        );
 
         this.logger.error("request failed", parseError(error));
+
+        if (isBlacklisted) {
+            void this.reply.redirect(`${Website}/login?error=blacklisted`);
+            return this.reply;
+        }
 
         void this.reply.headers({
             "content-type": "text/html",

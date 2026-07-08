@@ -41,6 +41,7 @@ export enum ErrorCode {
     UserPasswordIncorrect, // user password (for update) incorrect
     UserOrPasswordIncorrect, // user or password (for login) incorrect
     UserPmiDrained, // user pmi used up, cannot generate new pmi
+    UserBlacklisted, // user is blacklisted, login/register rejected
 
     RecordNotFound = 500000, // record info not found
 

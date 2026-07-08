@@ -11,6 +11,8 @@ import { Status } from "../../../../../../constants/Project";
 import { ServiceUserPhone } from "../../../../../service/user/UserPhone";
 import { UserDAO } from "../../../../../../dao";
 import { ServiceUserSensitive } from "../../../../../service/user/UserSensitive";
+import { dataSource } from "../../../../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../../../../v2/services/user/blacklist";
 
 @Controller<RequestType, ResponseType>({
     method: "post",
@@ -48,6 +50,10 @@ export class BindingPhone extends AbstractController<RequestType, ResponseType> 
         const { phone, code } = this.body;
 
         const safePhone = SMSUtils.safePhone(phone);
+
+        await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+            phone,
+        });
 
         await BindingPhone.notExhaustiveAttack(safePhone);
 

@@ -4,6 +4,8 @@ import { LoginPlatform } from "../../../../constants/Project";
 import { Logger, LoggerAPI } from "../../../../logger";
 import { LoginWechat } from "../platforms/LoginWechat";
 import { ServiceUserWeChat } from "../../../service/user/UserWeChat";
+import { dataSource } from "../../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../../v2/services/user/blacklist";
 
 export const wechatCallback = async (
     code: string,
@@ -11,12 +13,19 @@ export const wechatCallback = async (
     type: "WEB" | "MOBILE",
     logger: Logger<LoggerAPI>,
     reply: FastifyReply,
+    ids: IDS,
 ): Promise<WeChatResponse> => {
     await LoginWechat.assertHasAuthUUID(authUUID, logger);
 
     const userInfo = await LoginWechat.getUserInfoAndToken(code, type);
 
     const userUUIDByDB = await ServiceUserWeChat.userUUIDByUnionUUID(userInfo.unionUUID);
+
+    if (userUUIDByDB) {
+        await new UserBlacklistService(ids, dataSource.manager).assertNotBanned({
+            userUUID: userUUIDByDB,
+        });
+    }
 
     const userUUID = userUUIDByDB || v4();
 

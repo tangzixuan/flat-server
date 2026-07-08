@@ -146,6 +146,11 @@ login:
       access_id:
       access_secret:
       account_name: test@test.test
+  captcha:
+    scene_id:
+    access_id:
+    access_secret:
+    endpoint:
 
 apple:
   app_id: 48TB6ZZL5S.io.agora.flat
@@ -226,4 +231,4 @@ censorship:
       endpoint: green.cn-shanghai.aliyuncs.com
 
 admin:
-  secret:
+  secret: flat-server-test-admin

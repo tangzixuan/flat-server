@@ -8,6 +8,7 @@ import { RoomStatus } from "../../../../../model/room/Constants";
 import { Status } from "../../../../../constants/Project";
 import { ErrorCode } from "../../../../../ErrorCode";
 import { RoomUserDAO, UserDAO } from "../../../../../dao";
+import { UserBlacklistService } from "../../../../../v2/services/user/blacklist";
 
 const namespace = "[api][api-v1][api-v1-room][api-v1-room-join]";
 
@@ -60,4 +61,81 @@ test(`${namespace} - reject join when room not begin`, async ava => {
         room_uuid: roomUUID,
     });
     ava.not(data, undefined);
+});
+
+test(`${namespace} - blacklisted user join existing room rejected`, async ava => {
+    ava.plan(1);
+
+    const roomUUID = v4();
+    const [ownerUUID] = await createRoomUser(roomUUID, 1);
+    const joinUserId = v4();
+    await UserDAO().insert({
+        user_uuid: joinUserId,
+        user_name: "test_name",
+        avatar_url: "xxx",
+        user_password: "",
+    });
+    await createRoom(ownerUUID, roomUUID, RoomStatus.Started);
+
+    await new UserBlacklistService(
+        { reqID: v4(), sesID: v4() },
+        dataSource.manager,
+    ).banByUserUUID(joinUserId);
+
+    const joinRoom = createJoinRoom(roomUUID, joinUserId);
+    try {
+        await joinRoom.execute();
+    } catch (error) {
+        ava.is(joinRoom.errorHandler(error as Error).code, ErrorCode.UserBlacklisted);
+    }
+});
+
+test(`${namespace} - blacklisted user join nonexistent room returns RoomNotFound`, async ava => {
+    ava.plan(1);
+
+    const joinUserId = v4();
+    await UserDAO().insert({
+        user_uuid: joinUserId,
+        user_name: "test_name",
+        avatar_url: "xxx",
+        user_password: "",
+    });
+
+    await new UserBlacklistService(
+        { reqID: v4(), sesID: v4() },
+        dataSource.manager,
+    ).banByUserUUID(joinUserId);
+
+    const joinRoom = createJoinRoom(v4(), joinUserId);
+    try {
+        await joinRoom.execute();
+    } catch (error) {
+        ava.is(joinRoom.errorHandler(error as Error).code, ErrorCode.RoomNotFound);
+    }
+});
+
+test(`${namespace} - blacklisted user join with wrong invite code returns RoomNotFound`, async ava => {
+    ava.plan(1);
+
+    const joinUserId = v4();
+    await UserDAO().insert({
+        user_uuid: joinUserId,
+        user_name: "test_name",
+        avatar_url: "xxx",
+        user_password: "",
+    });
+
+    await new UserBlacklistService(
+        { reqID: v4(), sesID: v4() },
+        dataSource.manager,
+    ).banByUserUUID(joinUserId);
+
+    // 10-digit invite code that does not map to any room
+    const wrongInviteCode = "1234567890";
+    const joinRoom = createJoinRoom(wrongInviteCode, joinUserId);
+    try {
+        await joinRoom.execute();
+    } catch (error) {
+        ava.is(joinRoom.errorHandler(error as Error).code, ErrorCode.RoomNotFound);
+    }
 });

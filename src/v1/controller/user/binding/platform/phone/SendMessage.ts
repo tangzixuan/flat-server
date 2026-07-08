@@ -10,6 +10,8 @@ import { MessageExpirationSecond, MessageIntervalSecond } from "./Constants";
 import { ServiceUserPhone } from "../../../../../service/user/UserPhone";
 import { ControllerError } from "../../../../../../error/ControllerError";
 import { ErrorCode } from "../../../../../../ErrorCode";
+import { dataSource } from "../../../../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../../../../v2/services/user/blacklist";
 
 @Controller<RequestType, any>({
     method: "post",
@@ -41,6 +43,10 @@ export class SendMessage extends AbstractController<RequestType, ResponseType> {
         const sms = new SMS(phone);
 
         const safePhone = SMSUtils.safePhone(phone);
+
+        await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+            phone,
+        });
 
         if (await SendMessage.canSend(safePhone)) {
             if (await this.svc.userPhone.exist()) {

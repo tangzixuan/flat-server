@@ -41,4 +41,10 @@ export class UserModel extends Content {
         default: false,
     })
     is_delete: boolean;
+
+    @Index("users_is_blacklist_index")
+    @Column({
+        default: false,
+    })
+    is_blacklist: boolean;
 }
