@@ -13,6 +13,7 @@ import { MessageExpirationSecond, MessageIntervalSecond } from "../../constants"
 import { userDAO, userEmailDAO, userPhoneDAO } from "../../dao";
 import { setGuidePPTX } from "./utils";
 import { generateAvatar } from "../../../utils/Avatar";
+import { UserBlacklistService } from "./blacklist";
 
 export class UserEmailService {
     private readonly logger = createLoggerService<"userEmail">({
@@ -23,6 +24,8 @@ export class UserEmailService {
     constructor(private readonly ids: IDS, private readonly DBTransaction: EntityManager) {}
 
     public async sendMessageForRegister(email: string, language?: string): Promise<void> {
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ email });
+
         const sms = new Email(email, {
             tagName: "register",
             subject: EmailUtils.getSubject("register", language),
@@ -54,6 +57,8 @@ export class UserEmailService {
     }
 
     public async sendMessageForReset(email: string, language?: string): Promise<void> {
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ email });
+
         const sms = new Email(email, {
             tagName: "reset",
             subject: EmailUtils.getSubject("reset", language),
@@ -91,6 +96,8 @@ export class UserEmailService {
         jwtSign: (userUUID: string) => Promise<string>,
     ): Promise<EmailRegisterReturn> {
         password = hash(password);
+
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ email });
 
         await UserEmailService.notExhaustiveAttack(email);
         await UserEmailService.assertCodeCorrect(email, code);
@@ -139,6 +146,8 @@ export class UserEmailService {
     public async reset(email: string, code: number, password: string): Promise<void> {
         password = hash(password);
 
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ email });
+
         await UserEmailService.notExhaustiveAttack(email);
         await UserEmailService.assertCodeCorrect(email, code);
         await UserEmailService.clearTryRegisterCount(email);
@@ -164,6 +173,8 @@ export class UserEmailService {
         jwtSign: (userUUID: string) => Promise<string>,
     ): Promise<EmailLoginReturn> {
         password = hash(password);
+
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ email });
 
         const userUUIDByEmail = await this.userUUIDByEmail(email);
         if (!userUUIDByEmail) {

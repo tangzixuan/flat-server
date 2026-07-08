@@ -13,11 +13,12 @@ import { useTransaction } from "../../../__tests__/helpers/db/query-runner";
 import { initializeDataSource } from "../../../__tests__/helpers/db/test-hooks";
 import { ids } from "../../../__tests__/helpers/fastify/ids";
 import { UserEmailService } from "../email";
+import { UserBlacklistService } from "../blacklist";
 
 const namespace = "v2.services.user.email";
 initializeDataSource(test, namespace);
 
-test(`${namespace} - user already registered in send message`, async ava => {
+test.serial(`${namespace} - user already registered in send message`, async ava => {
     const { t, releaseRunner } = await useTransaction();
     const { createUser, createUserEmail } = testService(t);
 
@@ -35,7 +36,7 @@ test(`${namespace} - user already registered in send message`, async ava => {
     await releaseRunner();
 });
 
-test(`${namespace} - user not found in send message for reset`, async ava => {
+test.serial(`${namespace} - user not found in send message for reset`, async ava => {
     const { t, releaseRunner } = await useTransaction();
 
     await ava.throwsAsync(
@@ -49,7 +50,7 @@ test(`${namespace} - user not found in send message for reset`, async ava => {
     await releaseRunner();
 });
 
-test(`${namespace} - user email already registered`, async ava => {
+test.serial(`${namespace} - user email already registered`, async ava => {
     const { t, releaseRunner } = await useTransaction();
     const { createUser, createUserEmail } = testService(t);
 
@@ -79,7 +80,7 @@ test(`${namespace} - user email already registered`, async ava => {
     await releaseRunner();
 });
 
-test(`${namespace} - user email register success`, async ava => {
+test.serial(`${namespace} - user email register success`, async ava => {
     const { t, releaseRunner } = await useTransaction();
 
     const email = `${v4()}@test.com`;
@@ -103,7 +104,7 @@ test(`${namespace} - user email register success`, async ava => {
     await releaseRunner();
 });
 
-test(`${namespace} - user email not found in reset`, async ava => {
+test.serial(`${namespace} - user email not found in reset`, async ava => {
     const { t, releaseRunner } = await useTransaction();
 
     const email = `${v4()}@test.com`;
@@ -119,7 +120,7 @@ test(`${namespace} - user email not found in reset`, async ava => {
     await releaseRunner();
 });
 
-test(`${namespace} - user email reset success`, async ava => {
+test.serial(`${namespace} - user email reset success`, async ava => {
     const { t, releaseRunner } = await useTransaction();
     const { createUser, createUserEmail } = testService(t);
 
@@ -145,7 +146,7 @@ test(`${namespace} - user email reset success`, async ava => {
     await releaseRunner();
 });
 
-test(`${namespace} - user email not found in login`, async ava => {
+test.serial(`${namespace} - user email not found in login`, async ava => {
     const { t, releaseRunner } = await useTransaction();
     const { createUser, createUserEmail } = testService(t);
 
@@ -171,7 +172,7 @@ test(`${namespace} - user email not found in login`, async ava => {
     await releaseRunner();
 });
 
-test(`${namespace} - user email wrong password`, async ava => {
+test.serial(`${namespace} - user email wrong password`, async ava => {
     const { t, releaseRunner } = await useTransaction();
     const { createUser, createUserEmail } = testService(t);
 
@@ -189,7 +190,7 @@ test(`${namespace} - user email wrong password`, async ava => {
     await releaseRunner();
 });
 
-test(`${namespace} - user email login success`, async ava => {
+test.serial(`${namespace} - user email login success`, async ava => {
     const { t, releaseRunner } = await useTransaction();
     const { createUser, createUserEmail } = testService(t);
 
@@ -204,6 +205,119 @@ test(`${namespace} - user email login success`, async ava => {
     );
 
     ava.is(result.userUUID, userInfo.userUUID);
+
+    await releaseRunner();
+});
+
+test.serial(`${namespace} - blacklisted email register rejected`, async ava => {
+    const { t, releaseRunner } = await useTransaction();
+
+    const email = `${v4()}@example.com`;
+    RedisService.set(RedisKey.emailRegisterOrReset(email), "666666", MessageExpirationSecond);
+
+    await new UserBlacklistService(ids(), t).banByEmail(email);
+
+    await ava.throwsAsync(
+        () =>
+            new UserEmailService(ids(), t).register(
+                email,
+                666666,
+                v4(),
+                async () => "",
+            ),
+        {
+            instanceOf: FError,
+            message: `${Status.Failed}: ${ErrorCode.UserBlacklisted}`,
+        },
+    );
+
+    await releaseRunner();
+});
+
+test.serial(`${namespace} - blacklisted email login rejected`, async ava => {
+    const { t, releaseRunner } = await useTransaction();
+    const { createUser, createUserEmail } = testService(t);
+
+    const password = v4();
+    const userInfo = await createUser.quick({ userPassword: hash(password) });
+    const userEmailInfo = await createUserEmail.quick(userInfo);
+
+    await new UserBlacklistService(ids(), t).banByEmail(userEmailInfo.userEmail);
+
+    await ava.throwsAsync(
+        () =>
+            new UserEmailService(ids(), t).login(
+                userEmailInfo.userEmail,
+                password,
+                async () => "",
+            ),
+        {
+            instanceOf: FError,
+            message: `${Status.Failed}: ${ErrorCode.UserBlacklisted}`,
+        },
+    );
+
+    await releaseRunner();
+});
+
+test.serial(`${namespace} - blacklisted email sendMessageForRegister rejected`, async ava => {
+    const { t, releaseRunner } = await useTransaction();
+
+    const email = `${v4()}@example.com`;
+    await new UserBlacklistService(ids(), t).banByEmail(email);
+
+    await ava.throwsAsync(
+        () => new UserEmailService(ids(), t).sendMessageForRegister(email),
+        {
+            instanceOf: FError,
+            message: `${Status.Failed}: ${ErrorCode.UserBlacklisted}`,
+        },
+    );
+
+    await releaseRunner();
+});
+
+test.serial(`${namespace} - blacklisted email sendMessageForReset rejected`, async ava => {
+    const { t, releaseRunner } = await useTransaction();
+    const { createUser, createUserEmail } = testService(t);
+
+    const userInfo = await createUser.quick();
+    const userEmailInfo = await createUserEmail.quick(userInfo);
+    await new UserBlacklistService(ids(), t).banByEmail(userEmailInfo.userEmail);
+
+    await ava.throwsAsync(
+        () => new UserEmailService(ids(), t).sendMessageForReset(userEmailInfo.userEmail),
+        {
+            instanceOf: FError,
+            message: `${Status.Failed}: ${ErrorCode.UserBlacklisted}`,
+        },
+    );
+
+    await releaseRunner();
+});
+
+test.serial(`${namespace} - blacklisted email reset rejected`, async ava => {
+    const { t, releaseRunner } = await useTransaction();
+    const { createUser, createUserEmail } = testService(t);
+
+    const userInfo = await createUser.quick();
+    const userEmailInfo = await createUserEmail.quick(userInfo);
+    await new UserBlacklistService(ids(), t).banByEmail(userEmailInfo.userEmail);
+
+    RedisService.set(
+        RedisKey.emailRegisterOrReset(userEmailInfo.userEmail),
+        "666666",
+        MessageExpirationSecond,
+    );
+
+    await ava.throwsAsync(
+        () =>
+            new UserEmailService(ids(), t).reset(userEmailInfo.userEmail, 666666, v4()),
+        {
+            instanceOf: FError,
+            message: `${Status.Failed}: ${ErrorCode.UserBlacklisted}`,
+        },
+    );
 
     await releaseRunner();
 });

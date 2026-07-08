@@ -10,6 +10,10 @@ import { v4 } from "uuid";
 import { LoginPlatform } from "../../../../constants/Project";
 import { failedHTML, successHTML } from "../utils/callbackHTML";
 import { Google } from "../../../../constants/Config";
+import { dataSource } from "../../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../../v2/services/user/blacklist";
+import { FError } from "../../../../error/ControllerError";
+import { ErrorCode } from "../../../../ErrorCode";
 
 @Controller<RequestType, any>({
     method: "get",
@@ -52,6 +56,12 @@ export class GoogleCallback extends AbstractController<RequestType> {
 
         const userUUIDByDB = await ServiceUserGoogle.userUUIDByUnionUUID(userInfo.unionUUID);
 
+        if (userUUIDByDB) {
+            await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+                userUUID: userUUIDByDB,
+            });
+        }
+
         const userUUID = userUUIDByDB || v4();
 
         const loginGoogle = new LoginGoogle({
@@ -80,7 +90,12 @@ export class GoogleCallback extends AbstractController<RequestType> {
 
     public async errorHandler(error: Error): Promise<ResponseError> {
         this.logger.error("request failed", parseError(error));
-        await redisService.set(RedisKey.authFailed(this.querystring.state), "", 60 * 60);
+
+        const failedReason =
+            error instanceof FError && error.errorCode === ErrorCode.UserBlacklisted
+                ? "user_blacklisted"
+                : "";
+        await redisService.set(RedisKey.authFailed(this.querystring.state), failedReason, 60 * 60);
 
         return this.reply.send(failedHTML());
     }

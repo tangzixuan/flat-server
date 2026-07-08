@@ -33,6 +33,7 @@ import {
 } from "../../dao";
 import { generateAvatar } from "../../../utils/Avatar";
 import { RoomStatus } from "../../../model/room/Constants";
+import { UserBlacklistService } from "./blacklist";
 
 type UserPlatform =
     | UserModel
@@ -72,6 +73,8 @@ export class UserRebindPhoneService {
 
         const safePhone = SMSUtils.safePhone(phone);
 
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ phone });
+
         if (await UserRebindPhoneService.canSend(safePhone)) {
             if (await this.exists(userPhoneDAO, this.userUUID)) {
                 throw new FError(ErrorCode.SMSAlreadyExist);
@@ -106,22 +109,11 @@ export class UserRebindPhoneService {
         jwtSign: (userUUID: string) => Promise<string>,
     ): Promise<UserRebindReturn> {
         const safePhone = SMSUtils.safePhone(phone);
-        await UserRebindPhoneService.notExhaustiveAttack(safePhone);
 
-        const joinedRoomCount = await alreadyJoinedRoomCount(this.userUUID, this.DBTransaction);
-        if (joinedRoomCount > 0) {
-            this.logger.info("user has room", { rebindPhone: { userUUID: this.userUUID } });
-            await Promise.all([
-                roomUserDAO.delete(this.DBTransaction, {
-                    user_uuid: this.userUUID,
-                }),
-                roomDAO.update(
-                    this.DBTransaction,
-                    { room_status: RoomStatus.Stopped, end_time: new Date() },
-                    { owner_uuid: this.userUUID },
-                ),
-            ]);
-        }
+        const blacklist = new UserBlacklistService(this.ids, this.DBTransaction);
+        await blacklist.assertNotBanned({ phone });
+
+        await UserRebindPhoneService.notExhaustiveAttack(safePhone);
 
         const exist = await this.exists(userDAO, this.userUUID);
         if (!exist) {
@@ -143,8 +135,25 @@ export class UserRebindPhoneService {
             throw new FError(ErrorCode.UserNotFound);
         }
 
+        await blacklist.assertNotBanned({ userUUID: original.user_uuid });
+
         await UserRebindPhoneService.assertCodeCorrect(safePhone, code);
         await UserRebindPhoneService.clearTryBindingCount(safePhone);
+
+        const joinedRoomCount = await alreadyJoinedRoomCount(this.userUUID, this.DBTransaction);
+        if (joinedRoomCount > 0) {
+            this.logger.info("user has room", { rebindPhone: { userUUID: this.userUUID } });
+            await Promise.all([
+                roomUserDAO.delete(this.DBTransaction, {
+                    user_uuid: this.userUUID,
+                }),
+                roomDAO.update(
+                    this.DBTransaction,
+                    { room_status: RoomStatus.Stopped, end_time: new Date() },
+                    { owner_uuid: this.userUUID },
+                ),
+            ]);
+        }
 
         // Move binding data from this.userUUID to original.user_uuid
         const status: RebindStatus = {

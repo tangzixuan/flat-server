@@ -34,6 +34,8 @@ export const RedisKey = {
 
     userDelete: (userUUID: string): string => `user:delete:${userUUID}`,
 
+    userBlacklist: (userUUID: string): string => `user:blacklist:${userUUID}`,
+
     videoIllegalCount: (roomUUID: string): string => `illegal:video:${roomUUID}`,
     voiceIllegalCount: (roomUUID: string): string => `illegal:voice:${roomUUID}`,
 

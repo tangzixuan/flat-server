@@ -19,6 +19,7 @@ import { dataSource } from "../../../../thirdPartyService/TypeORMService";
 import RedisService from "../../../../thirdPartyService/RedisService";
 import { RedisKey } from "../../../../utils/Redis";
 import { parseError } from "../../../../logger";
+import { UserBlacklistService } from "../../../../v2/services/user/blacklist";
 
 @Controller<RequestType, ResponseType>({
     method: "post",
@@ -85,6 +86,10 @@ export class CreateOrdinary extends AbstractController<RequestType, ResponseType
     }
 
     public async execute(): Promise<Response<ResponseType>> {
+        await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+            userUUID: this.userUUID,
+        });
+
         await this.checkParams();
 
         // If request PMI and exist one room that uses PMI, reject.

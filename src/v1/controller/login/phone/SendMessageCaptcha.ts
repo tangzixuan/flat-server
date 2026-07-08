@@ -10,6 +10,8 @@ import { MessageExpirationSecond, MessageIntervalSecond } from "./Constants";
 import { ControllerError } from "../../../../error/ControllerError";
 import { ErrorCode } from "../../../../ErrorCode";
 import { CaptchaClient } from "../../../../v2/services/captcha/ali-captcha-client";
+import { dataSource } from "../../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../../v2/services/user/blacklist";
 
 @Controller<RequestType, any>({
     method: "post",
@@ -37,6 +39,11 @@ export class SendMessageCaptcha extends AbstractController<RequestType, Response
 
     public async execute(): Promise<Response<ResponseType>> {
         const { phone, captchaVerifyParam } = this.body;
+
+        await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+            phone,
+        });
+
         const sms = new SMS(phone);
 
         const safePhone = SMSUtils.safePhone(phone);

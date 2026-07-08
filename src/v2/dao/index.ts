@@ -14,6 +14,7 @@ import { UserEmailModel } from "../../model/user/Email";
 import { UserSensitiveModel } from "../../model/user/Sensitive";
 import { UserPmiModel } from "../../model/user/Pmi";
 import { UserAgreementModel } from "../../model/user/Agreement";
+import { UserBlacklistModel } from "../../model/user/Blacklist";
 import { RoomModel } from "../../model/room/Room";
 import { RoomUserModel } from "../../model/room/RoomUser";
 import { RoomPeriodicConfigModel } from "../../model/room/RoomPeriodicConfig";
@@ -29,6 +30,7 @@ import { OAuthUsersModel } from "../../model/oauth/oauth-users";
 import { PartnerModel } from "../../model/partner/Partner";
 import { PartnerRoomModel } from "../../model/partner/PartnerRoom";
 import { dataSource } from "../../thirdPartyService/TypeORMService";
+import { AdminAccountModel } from "../../model/admin/AdminAccount";
 
 export class DAO<M extends Model> {
     public constructor(private readonly model: EntityTarget<M>) {}
@@ -191,6 +193,7 @@ export const userEmailDAO = new DAO(UserEmailModel);
 export const userSensitiveDAO = new DAO(UserSensitiveModel);
 export const userPmiDAO = new DAO(UserPmiModel);
 export const userAgreementDAO = new DAO(UserAgreementModel);
+export const userBlacklistDAO = new DAO(UserBlacklistModel);
 export const roomDAO = new DAO(RoomModel);
 export const roomUserDAO = new DAO(RoomUserModel);
 export const roomPeriodicConfigDAO = new DAO(RoomPeriodicConfigModel);
@@ -205,3 +208,4 @@ export const oauthSecretsDAO = new DAO(OAuthSecretsModel);
 export const oauthUsersDAO = new DAO(OAuthUsersModel);
 export const partnerDAO = new DAO(PartnerModel);
 export const partnerRoomDAO = new DAO(PartnerRoomModel);
+export const adminAccountDAO = new DAO(AdminAccountModel);

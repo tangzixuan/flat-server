@@ -14,6 +14,7 @@ import { userDAO, userPhoneDAO } from "../../dao";
 import { setGuidePPTX } from "./utils";
 import { generateAvatar } from "../../../utils/Avatar";
 import { CaptchaClient } from "../captcha/ali-captcha-client";
+import { UserBlacklistService } from "./blacklist";
 
 export class UserPhoneService {
     private readonly logger = createLoggerService<"userPhone">({
@@ -27,6 +28,8 @@ export class UserPhoneService {
         const sms = new SMS(phone);
 
         const safePhone = SMSUtils.safePhone(phone);
+
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ phone });
 
         if (await UserPhoneService.canSend(safePhone)) {
             const exist = await userPhoneDAO.findOne(this.DBTransaction, ["user_uuid"], {
@@ -66,6 +69,8 @@ export class UserPhoneService {
         const sms = new SMS(phone);
 
         const safePhone = SMSUtils.safePhone(phone);
+
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ phone });
 
         if (await UserPhoneService.canSend(safePhone)) {
             const user = await userPhoneDAO.findOne(this.DBTransaction, ["user_uuid"], {
@@ -109,6 +114,8 @@ export class UserPhoneService {
         password = hash(password);
 
         const safePhone = SMSUtils.safePhone(phone);
+
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ phone });
 
         await UserPhoneService.notExhaustiveAttack(safePhone);
         await UserPhoneService.assertCodeCorrect(safePhone, code);
@@ -160,6 +167,8 @@ export class UserPhoneService {
 
         const safePhone = SMSUtils.safePhone(phone);
 
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ phone });
+
         await UserPhoneService.notExhaustiveAttack(safePhone);
         await UserPhoneService.assertCodeCorrect(safePhone, code);
         await UserPhoneService.clearTryRegisterCount(safePhone);
@@ -185,6 +194,8 @@ export class UserPhoneService {
         jwtSign: (userUUID: string) => Promise<string>,
     ): Promise<PhoneLoginReturn> {
         password = hash(password);
+
+        await new UserBlacklistService(this.ids, this.DBTransaction).assertNotBanned({ phone });
 
         const userUUIDByPhone = await this.userUUIDByPhone(phone);
         if (!userUUIDByPhone) {
