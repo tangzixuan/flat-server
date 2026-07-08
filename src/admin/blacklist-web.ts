@@ -1,5 +1,5 @@
 import { FastifyReply, FastifyRequest } from "fastify";
-import { FindOptionsWhere, In } from "typeorm";
+import { FindOptionsWhere, In, Not, IsNull } from "typeorm";
 import { ErrorCode } from "../ErrorCode";
 import { Status } from "../constants/Project";
 import { FError } from "../error/ControllerError";
@@ -16,6 +16,8 @@ import { AdminAccountService } from "../v2/services/admin/account";
 const ADMIN_COOKIE_NAME = "flat_admin_token";
 const ADMIN_SESSION_SECONDS = 60 * 60 * 12;
 const MAX_BATCH_SIZE = 500;
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
 const PHONE_MAX_LENGTH = 50;
 const EMAIL_MAX_LENGTH = 100;
 const REASON_MAX_LENGTH = 255;
@@ -24,7 +26,10 @@ const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type JWTApp = FastifyInstance & {
     jwt: {
-        sign: (payload: Record<string, unknown>, options?: { expiresIn?: string }) => Promise<string>;
+        sign: (
+            payload: Record<string, unknown>,
+            options?: { expiresIn?: string },
+        ) => Promise<string>;
         verify: <T>(token: string) => Promise<T>;
     };
 };
@@ -45,6 +50,12 @@ type ParsedIdentifierBatch = {
     }>;
 };
 
+type ParsedIdentifierSearch = ParsedIdentifierBatch & {
+    page: number;
+    pageSize: number;
+    listAll: boolean;
+};
+
 type UserBlacklistDTO = {
     userUUID: string | null;
     phone: string | null;
@@ -61,6 +72,13 @@ type UserBlacklistSearchItem = {
     normalized: string;
     banned: boolean;
     records: UserBlacklistDTO[];
+};
+
+type UserBlacklistPagination = {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
 };
 
 export const registerAdminBlacklistWeb = (app: FastifyInstance): void => {
@@ -121,9 +139,9 @@ export const registerAdminBlacklistWeb = (app: FastifyInstance): void => {
         if (!session) return reply;
 
         try {
-            const parsed = parseIdentifierBatch(request.body);
+            const parsed = parseIdentifierSearch(request.body);
             const items = await searchBlacklist(parsed);
-            return reply.send(successJSON({ items }));
+            return reply.send(successJSON(items));
         } catch (error) {
             return sendAdminError(reply, error);
         }
@@ -153,10 +171,12 @@ export const registerAdminBlacklistWeb = (app: FastifyInstance): void => {
                 }
             });
 
-            return reply.send(successJSON({
-                type: parsed.kind,
-                count: parsed.values.length,
-            }));
+            return reply.send(
+                successJSON({
+                    type: parsed.kind,
+                    count: parsed.values.length,
+                }),
+            );
         } catch (error) {
             return sendAdminError(reply, error);
         }
@@ -180,10 +200,12 @@ export const registerAdminBlacklistWeb = (app: FastifyInstance): void => {
                 }
             });
 
-            return reply.send(successJSON({
-                type: parsed.kind,
-                count: parsed.values.length,
-            }));
+            return reply.send(
+                successJSON({
+                    type: parsed.kind,
+                    count: parsed.values.length,
+                }),
+            );
         } catch (error) {
             return sendAdminError(reply, error);
         }
@@ -250,11 +272,30 @@ const clearAdminCookie = (reply: FastifyReply): void => {
 };
 
 const parseIdentifierBatch = (body: unknown): ParsedIdentifierBatch => {
-    const payload = body as {
-        phones?: unknown;
-        emails?: unknown;
-        userUUIDs?: unknown;
-    } | undefined;
+    return parseIdentifier(body, true);
+};
+
+const parseIdentifierSearch = (body: unknown): ParsedIdentifierSearch => {
+    const parsed = parseIdentifier(body, false);
+    const payload = body as { page?: unknown; pageSize?: unknown } | undefined;
+    const page = readPositiveInteger(payload?.page, 1, Number.MAX_SAFE_INTEGER);
+    const pageSize = readPositiveInteger(payload?.pageSize, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+    return {
+        ...parsed,
+        page,
+        pageSize,
+        listAll: parsed.values.length === 0,
+    };
+};
+
+const parseIdentifier = (body: unknown, requireValues: boolean): ParsedIdentifierBatch => {
+    const payload = body as
+        | {
+              phones?: unknown;
+              emails?: unknown;
+              userUUIDs?: unknown;
+          }
+        | undefined;
 
     const candidates: Array<{
         kind: IdentifierKind;
@@ -265,18 +306,26 @@ const parseIdentifierBatch = (body: unknown): ParsedIdentifierBatch => {
         { kind: "userUUID", raw: payload?.userUUIDs },
     ];
 
-    const nonEmpty = candidates
+    const selectedCandidates = candidates
         .map(candidate => ({
             ...candidate,
+            exists: Boolean(
+                payload &&
+                    Object.prototype.hasOwnProperty.call(payload, requestKeyByKind(candidate.kind)),
+            ),
             values: readStringArray(candidate.raw),
         }))
-        .filter(candidate => candidate.values.length > 0);
+        .filter(candidate => candidate.exists && (!requireValues || candidate.values.length > 0));
 
-    if (nonEmpty.length !== 1) {
+    if (selectedCandidates.length !== 1) {
         throw new FError(ErrorCode.ParamsCheckFailed);
     }
 
-    const selected = nonEmpty[0];
+    const selected = selectedCandidates[0];
+    if (requireValues && selected.values.length === 0) {
+        throw new FError(ErrorCode.ParamsCheckFailed);
+    }
+
     const items = selected.values.map(input => ({
         input,
         normalized: normalizeIdentifier(selected.kind, input),
@@ -292,6 +341,21 @@ const parseIdentifierBatch = (body: unknown): ParsedIdentifierBatch => {
         values: uniqueItems.map(item => item.normalized),
         items: uniqueItems,
     };
+};
+
+const requestKeyByKind = (kind: IdentifierKind): "phones" | "emails" | "userUUIDs" => {
+    if (kind === "phone") return "phones";
+    if (kind === "email") return "emails";
+    return "userUUIDs";
+};
+
+const readPositiveInteger = (value: unknown, fallback: number, max: number): number => {
+    if (value === undefined || value === null || value === "") return fallback;
+    const numeric = typeof value === "number" ? value : Number(value);
+    if (!Number.isInteger(numeric) || numeric < 1 || numeric > max) {
+        throw new FError(ErrorCode.ParamsCheckFailed);
+    }
+    return numeric;
 };
 
 const readStringArray = (value: unknown): string[] => {
@@ -342,8 +406,15 @@ const dedupeItems = (
 };
 
 const searchBlacklist = async (
-    parsed: ParsedIdentifierBatch,
-): Promise<UserBlacklistSearchItem[]> => {
+    parsed: ParsedIdentifierSearch,
+): Promise<{
+    items: UserBlacklistSearchItem[];
+    pagination: UserBlacklistPagination | null;
+}> => {
+    if (parsed.listAll) {
+        return await listBlacklist(parsed);
+    }
+
     const rows = await dataSource.manager.getRepository(UserBlacklistModel).find({
         where: searchWhere(parsed),
         select: [
@@ -366,21 +437,70 @@ const searchBlacklist = async (
         recordsByValue.set(key, records);
     }
 
-    return parsed.items.map(item => {
-        const records = recordsByValue.get(item.normalized) || [];
-        return {
-            type: parsed.kind,
-            input: item.input,
-            normalized: item.normalized,
-            banned: records.length > 0,
-            records,
-        };
-    });
+    return {
+        items: parsed.items.map(item => {
+            const records = recordsByValue.get(item.normalized) || [];
+            return {
+                type: parsed.kind,
+                input: item.input,
+                normalized: item.normalized,
+                banned: records.length > 0,
+                records,
+            };
+        }),
+        pagination: null,
+    };
 };
 
-const searchWhere = (
-    parsed: ParsedIdentifierBatch,
-): FindOptionsWhere<UserBlacklistModel> => {
+const listBlacklist = async (
+    parsed: ParsedIdentifierSearch,
+): Promise<{
+    items: UserBlacklistSearchItem[];
+    pagination: UserBlacklistPagination;
+}> => {
+    const [rows, total] = await dataSource.manager.getRepository(UserBlacklistModel).findAndCount({
+        where: listWhere(parsed.kind),
+        select: [
+            "user_uuid",
+            "phone_number",
+            "email",
+            "reason",
+            "operator",
+            "created_at",
+            "updated_at",
+        ],
+        order: {
+            created_at: "DESC",
+            id: "DESC",
+        },
+        skip: (parsed.page - 1) * parsed.pageSize,
+        take: parsed.pageSize,
+    });
+
+    return {
+        items: rows.flatMap(row => {
+            const key = recordKey(parsed.kind, row);
+            if (!key) return [];
+            return [
+                {
+                    type: parsed.kind,
+                    input: key,
+                    normalized: key,
+                    banned: true,
+                    records: [toBlacklistDTO(row)],
+                },
+            ];
+        }),
+        pagination: {
+            page: parsed.page,
+            pageSize: parsed.pageSize,
+            total,
+            totalPages: Math.max(1, Math.ceil(total / parsed.pageSize)),
+        },
+    };
+};
+
+const searchWhere = (parsed: ParsedIdentifierSearch): FindOptionsWhere<UserBlacklistModel> => {
     if (parsed.kind === "phone") {
         return {
             phone_number: In(parsed.values),
@@ -399,10 +519,26 @@ const searchWhere = (
     };
 };
 
-const recordKey = (
-    kind: IdentifierKind,
-    record: UserBlacklistModel,
-): string | null => {
+const listWhere = (kind: IdentifierKind): FindOptionsWhere<UserBlacklistModel> => {
+    if (kind === "phone") {
+        return {
+            phone_number: Not(IsNull()),
+            is_delete: false,
+        };
+    }
+    if (kind === "email") {
+        return {
+            email: Not(IsNull()),
+            is_delete: false,
+        };
+    }
+    return {
+        user_uuid: Not(IsNull()),
+        is_delete: false,
+    };
+};
+
+const recordKey = (kind: IdentifierKind, record: UserBlacklistModel): string | null => {
     if (kind === "phone") return record.phone_number;
     if (kind === "email") return record.email;
     return record.user_uuid;
@@ -607,6 +743,48 @@ input:focus, textarea:focus {
   gap: 10px;
   margin-top: 14px;
 }
+.list-options {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 13px;
+}
+select {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  padding: 8px 10px;
+  outline: none;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 13px;
+}
+.result-table-wrap {
+  height: 520px;
+  max-height: calc(100vh - 360px);
+  min-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.result-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
 .button {
   border: 1px solid transparent;
   border-radius: 6px;
@@ -674,6 +852,11 @@ table {
   table-layout: fixed;
   background: #fff;
 }
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
 th, td {
   border-bottom: 1px solid var(--line);
   padding: 10px;
@@ -736,6 +919,17 @@ th {
   }
   .summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .result-table-wrap {
+    height: 420px;
+    max-height: none;
+  }
+  .result-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .pager {
+    justify-content: flex-start;
   }
   .segmented {
     width: 100%;
@@ -809,7 +1003,7 @@ th {
           </div>
           <div>
             <div id="searchSummary" class="summary hidden"></div>
-            <div style="overflow:auto">
+            <div class="result-table-wrap">
               <table>
                 <thead>
                   <tr>
@@ -824,6 +1018,22 @@ th {
                   <tr><td colspan="5" class="muted">暂无数据</td></tr>
                 </tbody>
               </table>
+            </div>
+            <div class="result-footer">
+              <div class="list-options">
+                <label for="searchPageSize">每页</label>
+                <select id="searchPageSize">
+                  <option value="10">10</option>
+                  <option value="20">20</option>
+                  <option value="50">50</option>
+                </select>
+                <span>检索内容为空时分页拉取当前类型全部黑名单</span>
+              </div>
+              <div id="searchPager" class="pager hidden">
+                <button id="prevPageButton" class="button secondary compact" type="button">上一页</button>
+                <span id="searchPageInfo"></span>
+                <button id="nextPageButton" class="button secondary compact" type="button">下一页</button>
+              </div>
             </div>
           </div>
         </div>
@@ -855,7 +1065,7 @@ th {
           </div>
           <div>
             <div id="importSummary" class="summary hidden"></div>
-            <div style="overflow:auto">
+            <div class="result-table-wrap">
               <table>
                 <thead>
                   <tr>
@@ -881,7 +1091,9 @@ th {
     username: "",
     searchType: "phones",
     importType: "phones",
-    preview: null
+    preview: null,
+    searchPage: 1,
+    searchPagination: null
   };
   var maxBatch = 500;
   var phoneMaxLength = 50;
@@ -967,9 +1179,7 @@ th {
   }
 
   function parseLines(type, text) {
-    var lines = text.split(/\\r?\\n/).map(function (line) {
-      return line.split(",")[0].trim();
-    }).filter(Boolean);
+    var lines = splitValues(text);
     var seen = {};
     var valid = [];
     var invalid = [];
@@ -989,6 +1199,13 @@ th {
       invalid: invalid,
       chunks: chunk(valid.map(function (item) { return item.normalized; }), maxBatch)
     };
+  }
+
+  function splitValues(text) {
+    return text
+      .split(/[\\s,;，；]+/)
+      .map(function (value) { return value.trim(); })
+      .filter(Boolean);
   }
 
   function chunk(values, size) {
@@ -1019,6 +1236,24 @@ th {
       '<div class="metric"><strong>' + stats.valid.length + '</strong><span>有效去重</span></div>' +
       '<div class="metric"><strong>' + stats.invalid.length + '</strong><span>无效行</span></div>' +
       '<div class="metric"><strong>' + stats.chunks.length + '</strong><span>请求批次</span></div>';
+  }
+
+  function listMetrics(id, pagination, itemCount) {
+    el(id).classList.remove("hidden");
+    el(id).innerHTML =
+      '<div class="metric"><strong>' + pagination.total + '</strong><span>总记录</span></div>' +
+      '<div class="metric"><strong>' + pagination.page + '</strong><span>当前页</span></div>' +
+      '<div class="metric"><strong>' + pagination.totalPages + '</strong><span>总页数</span></div>' +
+      '<div class="metric"><strong>' + itemCount + '</strong><span>本页记录</span></div>';
+  }
+
+  function renderPager(pagination) {
+    state.searchPagination = pagination || null;
+    el("searchPager").classList.toggle("hidden", !pagination);
+    if (!pagination) return;
+    el("searchPageInfo").textContent = "第 " + pagination.page + " / " + pagination.totalPages + " 页";
+    el("prevPageButton").disabled = pagination.page <= 1;
+    el("nextPageButton").disabled = pagination.page >= pagination.totalPages;
   }
 
   function renderInvalidRows(invalid) {
@@ -1068,9 +1303,61 @@ th {
     el("searchRows").innerHTML = rows + invalidRows || '<tr><td colspan="5" class="muted">暂无数据</td></tr>';
   }
 
-  function doSearch(type, text, messageId) {
+  function renderImportPreview(preview, found) {
+    el("importRows").innerHTML = preview.valid.map(function (item) {
+      var result = found[item.normalized];
+      var banned = result && result.banned;
+      var badge = banned
+        ? '<span class="badge ok">已拉黑</span>'
+        : '<span class="badge ok">有效</span>';
+      return '<tr><td>' + escapeHTML(item.input) + '</td><td>' + escapeHTML(item.normalized) + '</td><td>' + badge + '</td></tr>';
+    }).join("") + renderInvalidRows(preview.invalid) || '<tr><td colspan="3" class="muted">暂无数据</td></tr>';
+  }
+
+  function lookupImportPreview(preview) {
+    var calls = preview.chunks.map(function (values) {
+      return api("/admin/api/blacklist/search", requestBody(state.importType, values));
+    });
+    return Promise.all(calls).then(function (results) {
+      var found = {};
+      results.forEach(function (result) {
+        (result.items || []).forEach(function (item) {
+          found[item.normalized] = item;
+        });
+      });
+      return found;
+    });
+  }
+
+  function doSearch(type, text, messageId, page) {
+    state.searchPage = page || 1;
     var parsed = parseLines(type, text);
+    if (!parsed.valid.length && !parsed.invalid.length) {
+      renderPager(null);
+      setMessage(messageId, "加载中...");
+      return api("/admin/api/blacklist/search", requestBody(type, [], {
+        page: state.searchPage,
+        pageSize: Number(el("searchPageSize").value)
+      })).then(function (result) {
+        var items = result.items || [];
+        var pagination = result.pagination || {
+          page: 1,
+          pageSize: Number(el("searchPageSize").value),
+          total: items.length,
+          totalPages: 1
+        };
+        listMetrics("searchSummary", pagination, items.length);
+        renderPager(pagination);
+        renderSearch(items, []);
+        setMessage(messageId, "加载完成", "ok");
+        return items;
+      }).catch(function (error) {
+        setMessage(messageId, "加载失败: " + error.message, "error");
+        throw error;
+      });
+    }
     metrics("searchSummary", parsed);
+    renderPager(null);
     if (!parsed.valid.length) {
       renderSearch([], parsed.invalid);
       setMessage(messageId, "没有可检索的数据", parsed.invalid.length ? "error" : "");
@@ -1100,7 +1387,7 @@ th {
     setMessage("searchMessage", "移除中...");
     api("/admin/api/blacklist/remove", requestBody(requestKeyFor(type), [value])).then(function () {
       setMessage("searchMessage", "移除成功，正在刷新", "ok");
-      return doSearch(state.searchType, el("searchInput").value, "searchMessage");
+      return doSearch(state.searchType, el("searchInput").value, "searchMessage", state.searchPage);
     }).catch(function (error) {
       setMessage("searchMessage", "移除失败: " + error.message, "error");
     });
@@ -1110,12 +1397,24 @@ th {
     var parsed = parseLines(state.importType, el("importInput").value);
     state.preview = parsed;
     metrics("importSummary", parsed);
-    var rows = parsed.valid.map(function (item) {
-      return '<tr><td>' + escapeHTML(item.input) + '</td><td>' + escapeHTML(item.normalized) + '</td><td><span class="badge ok">有效</span></td></tr>';
-    }).join("");
-    el("importRows").innerHTML = rows + renderInvalidRows(parsed.invalid) || '<tr><td colspan="3" class="muted">暂无数据</td></tr>';
-    el("importButton").disabled = parsed.valid.length === 0;
-    setMessage("importMessage", parsed.invalid.length ? "存在无效行，导入时会跳过" : "预览完成", parsed.invalid.length ? "error" : "ok");
+    el("importButton").disabled = true;
+    if (!parsed.valid.length) {
+      renderImportPreview(parsed, {});
+      setMessage("importMessage", parsed.invalid.length ? "没有可导入的数据" : "没有可预览的数据", parsed.invalid.length ? "error" : "");
+      return;
+    }
+    setMessage("importMessage", "预览中...");
+    lookupImportPreview(parsed).then(function (found) {
+      if (state.preview !== parsed) return;
+      renderImportPreview(parsed, found);
+      el("importButton").disabled = false;
+      setMessage("importMessage", parsed.invalid.length ? "存在无效行，导入时会跳过" : "预览完成", parsed.invalid.length ? "error" : "ok");
+    }).catch(function (error) {
+      if (state.preview !== parsed) return;
+      renderImportPreview(parsed, {});
+      el("importButton").disabled = false;
+      setMessage("importMessage", "预览回查失败: " + error.message + "，仍可继续导入", "error");
+    });
   }
 
   function invalidateImportPreview() {
@@ -1141,23 +1440,9 @@ th {
     });
     sequence.then(function () {
       setMessage("importMessage", "导入完成，正在回查", "ok");
-      var calls = chunks.map(function (values) {
-        return api("/admin/api/blacklist/search", requestBody(state.importType, values));
-      });
-      return Promise.all(calls);
-    }).then(function (results) {
-      var found = {};
-      results.forEach(function (result) {
-        (result.items || []).forEach(function (item) {
-          found[item.normalized] = item;
-        });
-      });
-      el("importRows").innerHTML = preview.valid.map(function (item) {
-        var result = found[item.normalized];
-        var banned = result && result.banned;
-        var badge = banned ? '<span class="badge ok">已拉黑</span>' : '<span class="badge bad">未命中</span>';
-        return '<tr><td>' + escapeHTML(item.input) + '</td><td>' + escapeHTML(item.normalized) + '</td><td>' + badge + '</td></tr>';
-      }).join("") + renderInvalidRows(preview.invalid);
+      return lookupImportPreview(preview);
+    }).then(function (found) {
+      renderImportPreview(preview, found);
     }).then(function () {
       setMessage("importMessage", "导入并回查完成", "ok");
     }).catch(function (error) {
@@ -1205,6 +1490,7 @@ th {
   Array.prototype.forEach.call(document.querySelectorAll(".search-type"), function (button) {
     button.addEventListener("click", function () {
       state.searchType = button.getAttribute("data-type");
+      state.searchPage = 1;
       setActive(".search-type", state.searchType);
       updateTypeNotes();
     });
@@ -1221,7 +1507,22 @@ th {
   });
 
   el("searchButton").addEventListener("click", function () {
-    doSearch(state.searchType, el("searchInput").value, "searchMessage").catch(function () {});
+    doSearch(state.searchType, el("searchInput").value, "searchMessage", 1).catch(function () {});
+  });
+
+  el("prevPageButton").addEventListener("click", function () {
+    if (!state.searchPagination || state.searchPagination.page <= 1) return;
+    doSearch(state.searchType, el("searchInput").value, "searchMessage", state.searchPagination.page - 1).catch(function () {});
+  });
+
+  el("nextPageButton").addEventListener("click", function () {
+    if (!state.searchPagination || state.searchPagination.page >= state.searchPagination.totalPages) return;
+    doSearch(state.searchType, el("searchInput").value, "searchMessage", state.searchPagination.page + 1).catch(function () {});
+  });
+
+  el("searchPageSize").addEventListener("change", function () {
+    if (el("searchInput").value.trim()) return;
+    doSearch(state.searchType, el("searchInput").value, "searchMessage", 1).catch(function () {});
   });
 
   el("searchRows").addEventListener("click", function (event) {
@@ -1234,6 +1535,7 @@ th {
     el("searchInput").value = "";
     el("searchRows").innerHTML = '<tr><td colspan="5" class="muted">暂无数据</td></tr>';
     el("searchSummary").classList.add("hidden");
+    renderPager(null);
     setMessage("searchMessage", "");
   });
 
