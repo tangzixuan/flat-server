@@ -7,6 +7,8 @@ import { loggerServer, parseError } from "../../logger";
 import { Status } from "../../constants/Project";
 import { ErrorCode } from "../../ErrorCode";
 import fp from "fastify-plugin";
+import RedisService from "../../thirdPartyService/RedisService";
+import { RedisKey } from "../../utils/Redis";
 
 const plugin = async (instance: FastifyInstance, _opts: any): Promise<void> => {
     await instance.register(jwt, {
@@ -31,6 +33,18 @@ const plugin = async (instance: FastifyInstance, _opts: any): Promise<void> => {
                 });
 
                 return;
+            }
+
+            const userUUID = (request.user as { userUUID?: string } | undefined)?.userUUID;
+            if (userUUID) {
+                const banned = await RedisService.get(RedisKey.userBlacklist(userUUID));
+                if (banned !== null) {
+                    await reply.send({
+                        status: Status.Failed,
+                        code: ErrorCode.UserBlacklisted,
+                    });
+                    return;
+                }
             }
         },
     );

@@ -6,6 +6,8 @@ import { ErrorCode } from "../../../ErrorCode";
 import { AbstractController } from "../../../abstract/controller";
 import { Controller } from "../../../decorator/Controller";
 import { AbstractLogin } from "../../../abstract/login";
+import { dataSource } from "../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../v2/services/user/blacklist";
 
 @Controller<RequestType, ResponseType>({
     method: "post",
@@ -41,6 +43,8 @@ export class LoginProcess extends AbstractController<RequestType, ResponseType> 
                     ? ErrorCode.LoginGithubURLMismatch
                     : failedReason === "access_denied"
                     ? ErrorCode.LoginGithubAccessDenied
+                    : failedReason === "user_blacklisted"
+                    ? ErrorCode.UserBlacklisted
                     : ErrorCode.CurrentProcessFailed;
 
             return {
@@ -66,6 +70,10 @@ export class LoginProcess extends AbstractController<RequestType, ResponseType> 
         }
 
         const userInfo = JSON.parse(userInfoStr);
+
+        await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+            userUUID: userInfo.userUUID,
+        });
 
         return {
             status: Status.Success,

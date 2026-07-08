@@ -10,6 +10,8 @@ import { RedisKey } from "../../../../utils/Redis";
 import { parseError } from "../../../../logger";
 import { ControllerError } from "../../../../error/ControllerError";
 import { ErrorCode } from "../../../../ErrorCode";
+import { dataSource } from "../../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../../v2/services/user/blacklist";
 
 @Controller<RequestType, ResponseType>({
     method: "post",
@@ -63,6 +65,10 @@ export class JoinRoom extends AbstractController<RequestType, ResponseType> {
         });
 
         if (isOrdinaryRoomUUID) {
+            await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+                userUUID: this.userUUID,
+            });
+
             return await joinOrdinary(uuid, userUUID);
         }
 
@@ -71,6 +77,10 @@ export class JoinRoom extends AbstractController<RequestType, ResponseType> {
         });
 
         if (isPeriodicRoom) {
+            await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+                userUUID: this.userUUID,
+            });
+
             return await joinPeriodic(uuid, userUUID);
         }
 

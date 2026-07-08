@@ -21,8 +21,10 @@ import { UserSensitiveModel } from "./user/Sensitive";
 import { UserEmailModel } from "./user/Email";
 import { UserPmiModel } from "./user/Pmi";
 import { UserAgreementModel } from "./user/Agreement";
+import { UserBlacklistModel } from "./user/Blacklist";
 import { PartnerModel } from "./partner/Partner";
 import { PartnerRoomModel } from "./partner/PartnerRoom";
+import { AdminAccountModel } from "./admin/AdminAccount";
 
 export type Model =
     | UserModel
@@ -36,6 +38,7 @@ export type Model =
     | UserSensitiveModel
     | UserPmiModel
     | UserAgreementModel
+    | UserBlacklistModel
     | RoomModel
     | RoomUserModel
     | RoomPeriodicConfigModel
@@ -49,4 +52,5 @@ export type Model =
     | OAuthSecretsModel
     | OAuthUsersModel
     | PartnerModel
-    | PartnerRoomModel;
+    | PartnerRoomModel
+    | AdminAccountModel;

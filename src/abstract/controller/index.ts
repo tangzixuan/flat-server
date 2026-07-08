@@ -5,7 +5,7 @@ import { ErrorCode } from "../../ErrorCode";
 import { Status } from "../../constants/Project";
 import { ControllerClassParams } from "./Type";
 import { FlatError } from "../../error/FlatError";
-import { ControllerError } from "../../error/ControllerError";
+import { ControllerError, FError } from "../../error/ControllerError";
 
 export * from "./Type";
 
@@ -49,7 +49,7 @@ export abstract class AbstractController<
     public abstract errorHandler(error: Error): ResponseError | Promise<ResponseError>;
 
     protected parseFlatError(error: FlatError): ResponseError | null {
-        if (error instanceof ControllerError) {
+        if (error instanceof ControllerError || error instanceof FError) {
             return {
                 status: error.status,
                 code: error.errorCode,

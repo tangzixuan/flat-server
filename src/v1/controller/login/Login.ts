@@ -13,6 +13,9 @@ import { ControllerError } from "../../../error/ControllerError";
 import { ErrorCode } from "../../../ErrorCode";
 import { ServiceUserPhone } from "../../service/user/UserPhone";
 import { ServiceUserEmail } from "../../service/user/UserEmail";
+import { dataSource } from "../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../v2/services/user/blacklist";
+import { userEmailDAO, userPhoneDAO } from "../../../v2/dao";
 
 @Controller<null, ResponseType>({
     method: "post",
@@ -49,6 +52,8 @@ export class Login extends AbstractController<RequestType, ResponseType> {
     }
 
     public async execute(): Promise<Response<ResponseType>> {
+        await this.assertNotBlacklisted();
+
         this.assertAccess();
 
         const { userName, avatarURL } = await this.svc.user.assertGetNameAndAvatar();
@@ -97,6 +102,23 @@ export class Login extends AbstractController<RequestType, ResponseType> {
 
     public errorHandler(error: Error): ResponseError {
         return this.autoHandlerError(error);
+    }
+
+    private async assertNotBlacklisted(): Promise<void> {
+        const [phone, email] = await Promise.all([
+            userPhoneDAO.findOne(dataSource.manager, ["phone_number"], {
+                user_uuid: this.userUUID,
+            }),
+            userEmailDAO.findOne(dataSource.manager, ["user_email"], {
+                user_uuid: this.userUUID,
+            }),
+        ]);
+
+        await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+            userUUID: this.userUUID,
+            phone: phone?.phone_number,
+            email: email?.user_email,
+        });
     }
 
     private assertAccess(): void {

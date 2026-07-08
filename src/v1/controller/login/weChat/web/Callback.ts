@@ -6,6 +6,9 @@ import { parseError } from "../../../../../logger";
 import { AbstractController } from "../../../../../abstract/controller";
 import { Controller } from "../../../../../decorator/Controller";
 import { WeChat } from "../../../../../constants/Config";
+import { FError } from "../../../../../error/ControllerError";
+import { ErrorCode } from "../../../../../ErrorCode";
+import { failedHTML } from "../../utils/callbackHTML";
 
 @Controller<RequestType, any>({
     method: "get",
@@ -39,14 +42,18 @@ export class WechatWebCallback extends AbstractController<RequestType> {
 
         const { state: authUUID, code } = this.querystring;
 
-        await wechatCallback(code, authUUID, "WEB", this.logger, this.reply);
+        await wechatCallback(code, authUUID, "WEB", this.logger, this.reply, this.req.ids);
     }
 
     public async errorHandler(error: Error): Promise<ResponseError> {
-        this.logger.error("request failed", parseError(error));
-        await redisService.set(RedisKey.authFailed(this.querystring.state), "", 60 * 60);
+        const failedReason =
+            error instanceof FError && error.errorCode === ErrorCode.UserBlacklisted
+                ? "user_blacklisted"
+                : "";
+        await redisService.set(RedisKey.authFailed(this.querystring.state), failedReason, 60 * 60);
 
-        return this.autoHandlerError(error);
+        this.logger.error("request failed", parseError(error));
+        return this.reply.send(failedHTML());
     }
 }
 

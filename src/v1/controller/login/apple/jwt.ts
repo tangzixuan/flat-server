@@ -10,6 +10,8 @@ import { Apple } from "../../../../constants/Config";
 import { ServiceUserPhone } from "../../../service/user/UserPhone";
 import { ServiceUser } from "../../../service/user/User";
 import { generateAvatar } from "../../../../utils/Avatar";
+import { dataSource } from "../../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../../v2/services/user/blacklist";
 
 @Controller<RequestType, ResponseType>({
     method: "post",
@@ -46,6 +48,12 @@ export class AppleJWT extends AbstractController<RequestType, ResponseType> {
         const appleID = token.payload.sub;
 
         const userUUIDByDB = await ServiceUserApple.userUUIDByUnionUUID(appleID);
+
+        if (userUUIDByDB) {
+            await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+                userUUID: userUUIDByDB,
+            });
+        }
 
         const userUUID = userUUIDByDB || v4();
 

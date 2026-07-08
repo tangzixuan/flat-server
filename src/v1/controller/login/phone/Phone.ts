@@ -12,6 +12,8 @@ import { ErrorCode } from "../../../../ErrorCode";
 import { LoginPhone } from "../platforms/LoginPhone";
 import { LoginPlatform, Status } from "../../../../constants/Project";
 import { generateAvatar } from "../../../../utils/Avatar";
+import { dataSource } from "../../../../thirdPartyService/TypeORMService";
+import { UserBlacklistService } from "../../../../v2/services/user/blacklist";
 
 @Controller<RequestType, any>({
     method: "post",
@@ -44,6 +46,10 @@ export class PhoneLogin extends AbstractController<RequestType, ResponseType> {
         const { phone, code } = this.body;
 
         const safePhone = SMSUtils.safePhone(this.body.phone);
+
+        await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+            phone,
+        });
 
         await PhoneLogin.notExhaustiveAttack(safePhone);
         await PhoneLogin.assertCodeCorrect(safePhone, code);

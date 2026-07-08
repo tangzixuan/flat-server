@@ -13,6 +13,7 @@ import { initializeDataSource } from "../../../__tests__/helpers/db/test-hooks";
 import { randomPhoneNumber } from "../../../__tests__/helpers/db/user-phone";
 import { ids } from "../../../__tests__/helpers/fastify/ids";
 import { MessageExpirationSecond, UserRebindPhoneService } from "../rebind-phone";
+import { UserBlacklistService } from "../blacklist";
 
 const namespace = "v2.services.user.rebind-phone";
 initializeDataSource(test, namespace);
@@ -164,6 +165,135 @@ test(`${namespace} - user rebind success`, async ava => {
 
     const userShouldDelete = await userDAO.findOne(t, ["id"], { user_uuid: userInfo.userUUID });
     ava.is(userShouldDelete, null);
+
+    await releaseRunner();
+});
+
+test(`${namespace} - sendMessage rejects blacklisted phone`, async ava => {
+    const { t, releaseRunner } = await useTransaction();
+    const { createUser, createUserPhone } = testService(t);
+
+    const targetUserInfo = await createUser.quick();
+    const targetUserPhoneInfo = await createUserPhone.quick(targetUserInfo);
+
+    await new UserBlacklistService(ids(), t).banByPhone(targetUserPhoneInfo.phoneNumber);
+
+    const callerUserInfo = await createUser.quick();
+
+    await ava.throwsAsync(
+        () =>
+            new UserRebindPhoneService(ids(), t, callerUserInfo.userUUID).sendMessage(
+                targetUserPhoneInfo.phoneNumber,
+            ),
+        {
+            instanceOf: FError,
+            message: `${Status.Failed}: ${ErrorCode.UserBlacklisted}`,
+        },
+    );
+
+    await releaseRunner();
+});
+
+test(`${namespace} - rebind rejects blacklisted phone`, async ava => {
+    const { t, releaseRunner } = await useTransaction();
+    const { createUser, createUserPhone } = testService(t);
+
+    const targetUserInfo = await createUser.quick();
+    const targetUserPhoneInfo = await createUserPhone.quick(targetUserInfo);
+
+    await new UserBlacklistService(ids(), t).banByPhone(targetUserPhoneInfo.phoneNumber);
+
+    const callerUserInfo = await createUser.quick();
+
+    await ava.throwsAsync(
+        () =>
+            new UserRebindPhoneService(ids(), t, callerUserInfo.userUUID).rebind(
+                targetUserPhoneInfo.phoneNumber,
+                666666,
+                async () => "",
+            ),
+        {
+            instanceOf: FError,
+            message: `${Status.Failed}: ${ErrorCode.UserBlacklisted}`,
+        },
+    );
+
+    await releaseRunner();
+});
+
+test(`${namespace} - rebind rejects when target user is blacklisted by userUUID`, async ava => {
+    const { t, releaseRunner } = await useTransaction();
+    const { createUser, createUserPhone } = testService(t);
+
+    const targetUserInfo = await createUser.quick();
+    const targetUserPhoneInfo = await createUserPhone.quick(targetUserInfo);
+
+    await new UserBlacklistService(ids(), t).banByUserUUID(targetUserInfo.userUUID);
+
+    const callerUserInfo = await createUser.quick();
+
+    RedisService.set(
+        RedisKey.phoneBinding(targetUserPhoneInfo.phoneNumber),
+        "666666",
+        MessageExpirationSecond,
+    );
+
+    await ava.throwsAsync(
+        () =>
+            new UserRebindPhoneService(ids(), t, callerUserInfo.userUUID).rebind(
+                targetUserPhoneInfo.phoneNumber,
+                666666,
+                async () => "",
+            ),
+        {
+            instanceOf: FError,
+            message: `${Status.Failed}: ${ErrorCode.UserBlacklisted}`,
+        },
+    );
+
+    await releaseRunner();
+});
+
+test(`${namespace} - rebind with blacklisted target userUUID does not stop caller rooms`, async ava => {
+    const { t, releaseRunner } = await useTransaction();
+    const { createUser, createUserPhone, createRoom, createRoomJoin } = testService(t);
+
+    const callerUserInfo = await createUser.quick();
+    const roomInfo = await createRoom.quick({
+        ownerUUID: callerUserInfo.userUUID,
+        roomStatus: RoomStatus.Started,
+    });
+    await createRoomJoin.quick({ ...roomInfo, ...callerUserInfo });
+
+    const targetUserInfo = await createUser.quick();
+    const targetUserPhoneInfo = await createUserPhone.quick(targetUserInfo);
+
+    await new UserBlacklistService(ids(), t).banByUserUUID(targetUserInfo.userUUID);
+
+    RedisService.set(
+        RedisKey.phoneBinding(targetUserPhoneInfo.phoneNumber),
+        "666666",
+        MessageExpirationSecond,
+    );
+
+    await ava.throwsAsync(
+        () =>
+            new UserRebindPhoneService(ids(), t, callerUserInfo.userUUID).rebind(
+                targetUserPhoneInfo.phoneNumber,
+                666666,
+                async () => "",
+            ),
+        {
+            instanceOf: FError,
+            message: `${Status.Failed}: ${ErrorCode.UserBlacklisted}`,
+        },
+    );
+
+    const room = await roomDAO.findOne(t, ["room_status"], { room_uuid: roomInfo.roomUUID });
+    ava.is(room?.room_status, RoomStatus.Started);
+
+    const join = await roomUserDAO.findOne(t, ["id"], { user_uuid: callerUserInfo.userUUID });
+    ava.not(join, null);
 
     await releaseRunner();
 });

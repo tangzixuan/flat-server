@@ -23,6 +23,7 @@ import { aliGreenText } from "../../../utils/AliGreen";
 import { ControllerError } from "../../../../error/ControllerError";
 import { dataSource } from "../../../../thirdPartyService/TypeORMService";
 import { Whiteboard } from "../../../../constants/Config";
+import { UserBlacklistService } from "../../../../v2/services/user/blacklist";
 
 @Controller<RequestType, ResponseType>({
     method: "post",
@@ -106,6 +107,10 @@ export class CreatePeriodic extends AbstractController<RequestType, ResponseType
     private readonly periodicUUID = generateRoomUUID();
 
     public async execute(): Promise<Response<ResponseType>> {
+        await new UserBlacklistService(this.req.ids, dataSource.manager).assertNotBanned({
+            userUUID: this.userUUID,
+        });
+
         const region = Whiteboard.region as Region;
         const { title, type, beginTime, endTime, periodic } = this.body;
         const userUUID = this.userUUID;

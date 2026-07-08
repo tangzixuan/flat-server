@@ -9,6 +9,8 @@ import { ax } from "../../../../utils/Axios";
 import { FilterValue, removeEmptyValue } from "../../../../../utils/Object";
 import { createOrdinaryFn } from "./helpers/createOrdinaryFn";
 import { ErrorCode } from "../../../../../ErrorCode";
+import { UserBlacklistService } from "../../../../../v2/services/user/blacklist";
+import { UserDAO } from "../../../../../dao";
 
 const namespace = "[api][api-v1][api-room][api-room-create][api-room-create-ordinary]";
 
@@ -135,5 +137,38 @@ test(`${namespace} - time interval less than fifteen minute`, async ava => {
         await createOrdinary.execute();
     } catch (error) {
         ava.is(createOrdinary.errorHandler(error).code, ErrorCode.ParamsCheckFailed);
+    }
+});
+
+test(`${namespace} - blacklisted user cannot create room`, async ava => {
+    ava.plan(1);
+
+    const userUUID = v4();
+    await UserDAO().insert({
+        user_uuid: userUUID,
+        user_name: "test_name",
+        avatar_url: "xxx",
+        user_password: "",
+    });
+    await new UserBlacklistService(
+        { reqID: v4(), sesID: v4() },
+        dataSource.manager,
+    ).banByUserUUID(userUUID);
+
+    const beginTime = Date.now();
+    const endTime = addHours(1)(beginTime).valueOf();
+
+    const createOrdinary = createOrdinaryFn(userUUID, {
+        title: "test",
+        type: RoomType.OneToOne,
+        region: Region.CN_HZ,
+        beginTime,
+        endTime,
+    });
+
+    try {
+        await createOrdinary.execute();
+    } catch (error) {
+        ava.is(createOrdinary.errorHandler(error).code, ErrorCode.UserBlacklisted);
     }
 });
